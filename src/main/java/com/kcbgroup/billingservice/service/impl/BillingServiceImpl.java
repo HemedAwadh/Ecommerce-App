@@ -1,7 +1,10 @@
 package com.kcbgroup.billingservice.service.impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kcbgroup.billingservice.client.OrderClient;
 import com.kcbgroup.billingservice.dto.SafaricomStkPushRequest;
+import com.kcbgroup.billingservice.dto.SafaricomStkPushResponse;
 import com.kcbgroup.billingservice.entities.Billing;
 import com.kcbgroup.billingservice.entities.Orders;
 import com.kcbgroup.billingservice.entities.Products;
@@ -9,13 +12,16 @@ import com.kcbgroup.billingservice.model.OrderResponse;
 import com.kcbgroup.billingservice.repositories.BillingRepository;
 import com.kcbgroup.billingservice.service.BillingService;
 import lombok.RequiredArgsConstructor;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.Date;
 import java.util.UUID;
@@ -25,47 +31,37 @@ import java.util.UUID;
 @Slf4j
 public class BillingServiceImpl implements BillingService {
 
+    @Value("${safaricom.passkey}")
+    private String passkey;
+
     private final BillingRepository billingRepository;
     private final OrderClient orderClient;
+    private final ObjectMapper objectMapper;
 
     @Override
-    public Billing generateBilling(Orders orders, Products products) {
-
-        Billing billing = new Billing();
-        billing.setBillingId(Long.valueOf(UUID.randomUUID().toString()));
-        billing.setProductId(String.valueOf(products.getId()));
-        billing.setOrderId(orders.getOrderId());
-        billing.setQuantity(orders.getQuantity());
-        billing.setUnitPrice(orders.getProductPrice());
-        billing.setTotalAmount(products.getPrice() * orders.getQuantity());
-
-        return billingRepository.save(billing);
-    }
-
-    @Override
-    public ResponseEntity<?> consumeMessage(OrderResponse orderResponse) {
+    public ResponseEntity<?> consumeMessage(OrderResponse orderResponse) throws JsonProcessingException {
 
         //1.Get access token
 
-
-        String timestamp = new SimpleDateFormat("YYYYMMDDHHmmss").format(new Date());
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
 
         // Step 2: Initiate STK Push payment
         SafaricomStkPushRequest stkRequest = new SafaricomStkPushRequest();
         stkRequest.setBusinessShortCode("174379");
-        stkRequest.setPassword(generatePassword("174379", timestamp, "bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919"));
+        stkRequest.setPassword(generatePassword("174379", timestamp, passkey));
         stkRequest.setTimestamp(timestamp);
         stkRequest.setTransactionType("CustomerPayBillOnline");
-        stkRequest.setAmount(String.valueOf(orderResponse.getPrimaryData().getTotalPrice()));
+        stkRequest.setAmount((int) orderResponse.getPrimaryData().getTotalPrice());
         stkRequest.setPartyA(orderResponse.getPrimaryData().getCustomerPhone());
         stkRequest.setPartyB("174379");
         stkRequest.setPhoneNumber(orderResponse.getPrimaryData().getCustomerPhone());
-        stkRequest.setCallBackURL("https://your-domain/api/callback/stkpush");
+        stkRequest.setCallbackURL("https://your-domain/api/callback/stkpush");
         stkRequest.setAccountReference("Payment");
         stkRequest.setTransactionDesc("Order Confirmation");
 
+        log.info("Billing request to Safaricom : {}", objectMapper.writeValueAsString(stkRequest));
 
-        var response = orderClient.processBilling(stkRequest);
+        SafaricomStkPushResponse response = orderClient.processBilling(stkRequest);
 
         log.info("Billing response from Safaricom : {}", response);
 
@@ -83,7 +79,7 @@ public class BillingServiceImpl implements BillingService {
         billingRepository.save(billing);
 
 
-        return null;
+        return ResponseEntity.ok().body(response);
 
 
         //4.receive callback
@@ -92,8 +88,8 @@ public class BillingServiceImpl implements BillingService {
     }
 
     private String generatePassword(String shortCode, String timestamp, String passkey) {
-        String strToEncode = shortCode + passkey + timestamp;
-        return Base64.getEncoder().encodeToString(strToEncode.getBytes());
+        String password = shortCode + passkey + timestamp;
+        return Base64.getEncoder().encodeToString(password.getBytes());
     }
 
 }

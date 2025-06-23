@@ -2,7 +2,6 @@ package com.kcbgroup.billingservice.service.impl;
 
 import com.kcbgroup.billingservice.dto.TokenResponse;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -30,10 +29,9 @@ public class TokenManager {
     private volatile Instant tokenExpiry;
     private final Object tokenLock = new Object();
 
-
     public Mono<String> getValidAccessToken() {
         if (isTokenValid()) {
-            log.info("AccessToken: {}", tokenResponse.getAccess_token());
+            log.debug("Using cached access token");
             return Mono.just(tokenResponse.getAccess_token());
         }
 
@@ -48,48 +46,52 @@ public class TokenManager {
     private boolean isTokenValid() {
         return tokenResponse != null &&
                 tokenExpiry != null &&
-                Instant.now().isBefore(tokenExpiry.minusSeconds(30)); // 30s buffer
+                Instant.now().isBefore(tokenExpiry.minusSeconds(30));
     }
 
     private Mono<String> obtainNewToken() {
+        String credentials = clientId + ":" + clientSecret;
+        String basicHeader = "Basic " + Base64.getEncoder().encodeToString(credentials.getBytes());
+
+        log.info("Requesting new token from [{}]", tokenEndpoint);
+
         WebClient webClient = WebClient.builder().build();
 
-        String credential = clientId + ":" + clientSecret;
-        String basicHeader = "Basic " + Base64.getEncoder().encodeToString(credential.getBytes());
-
-        return webClient.post()
+        return webClient.get()
                 .uri(tokenEndpoint)
                 .header(HttpHeaders.AUTHORIZATION, basicHeader)
-                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .accept(MediaType.APPLICATION_JSON)
                 .retrieve()
                 .bodyToMono(TokenResponse.class)
-                .doOnNext(this::updateToken)
-                .doOnSuccess(tokenResponse -> {
-                    log.info("New access token: {}", tokenResponse.getAccess_token());
-                })
-                .map(TokenResponse::getAccess_token)
+                .doOnRequest(req -> log.debug("Sending token request"))
+                .doOnSuccess(response -> log.info("Received new token: {}", response))
                 .doOnError(error -> {
-                    log.error("Error while obtaining new access token: {}", error.getMessage());
-                    // Log error and clear current token
-                    tokenResponse = null;
-                    tokenExpiry = null;
+                    log.error("Token request failed: {}", error.getMessage(), error);
+                    clearToken(); // clear only on failure
                 })
-                .doOnRequest((req) -> {
-                    log.info("HTTP Request [{}] --> ", req);
+                .map(token -> {
+                    updateToken(token);
+                    return token.getAccess_token();
                 });
     }
 
     private void updateToken(TokenResponse token) {
-        log.info("Updating access token: {}", token.getAccess_token());
+        try {
+            int expiresIn = Integer.parseInt(token.getExpires_in());
+            this.tokenExpiry = Instant.now().plusSeconds(expiresIn);
+        } catch (NumberFormatException e) {
+            log.warn("Invalid expires_in value: {}, defaulting to 300s", token.getExpires_in());
+            this.tokenExpiry = Instant.now().plusSeconds(300);
+        }
         this.tokenResponse = token;
-        this.tokenExpiry = Instant.now().plusSeconds(Integer.parseInt(token.getExpires_in()));
+        log.debug("Token updated successfully, expires at {}", tokenExpiry);
     }
 
     public void clearToken() {
         synchronized (tokenLock) {
-            tokenResponse = null;
-            tokenExpiry = null;
+            this.tokenResponse = null;
+            this.tokenExpiry = null;
         }
+        log.info("Access token cache cleared.");
     }
 }
-

@@ -2,23 +2,11 @@ server:
   port: 8082
 
 spring:
-  kafka:
-    bootstrap-servers: 159.89.225.129:9092
-    order-topic: "order-topic"
-    notification-topic: "notification-topic"
-    consumer:
-      group-id: "order-group"
+  profiles:
+    active: dev
 
-  datasource:
-    url: jdbc:postgresql://gstream.ccx6esg8q79p.us-east-1.rds.amazonaws.com:5432/billing
-    username: postgres
-    password: fwX8fdv34NFMl0Kw
+
   jpa:
     hibernate:
       ddl-auto: create
-safaricom:
-  baseurl: https://sandbox.safaricom.co.ke
-auth:
-  client-id: ASGdeLipqAQ2Q6hf5oRuM5QYgYwsMoscAhdxUO7CpszLNCPE
-  client-secret: jBG9CjJ5yaxdisxCORzdkAKTK4yAeIjcvKivEosd1pSAAbG9TM7H4K8vkmAI1ssS
-  token-endpoint: https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials
+

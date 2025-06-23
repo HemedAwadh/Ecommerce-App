@@ -1,45 +1,61 @@
 package com.kcbgroup.billingservice.configs;
 
 import com.kcbgroup.billingservice.client.OrderClient;
-import com.kcbgroup.billingservice.interceptor.TokenAuthenticationFilter;
+import com.kcbgroup.billingservice.service.impl.TokenManager;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.web.reactive.function.client.ClientRequest;
+import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.support.WebClientAdapter;
 import org.springframework.web.service.invoker.HttpServiceProxyFactory;
-import reactor.netty.http.client.HttpClient;
+import reactor.core.publisher.Mono;
 
 @Configuration
 @Slf4j
+@RequiredArgsConstructor
 public class HttpClientConfig {
 
     @Value("${safaricom.baseurl}")
-    private String BASE_URL;
+    private String safBaseUrl;
+
+    private final TokenManager tokenManager;
 
     @Bean
-    public WebClient orderWebClient(TokenAuthenticationFilter tokenFilter) {
-        HttpClient httpClient = HttpClient.create()
-                .doOnRequest((req, conn) -> {
-                    req.addHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE);
-                    req.addHeader("Accept", MediaType.APPLICATION_JSON_VALUE);
-                    log.info("HTTP Request [{}] --> Method: {}, URI: {}, Headers: ",
-                            req.method(), req.uri(), req.requestHeaders());
-                })
-                .doOnResponse((res, conn) -> {
-                    log.info("HTTP Response <-- Status: {}, Headers: {}",
-                            res.status(), res.responseHeaders());
-                })
-                .wiretap(true);
-
+    public WebClient orderWebClient() {
         return WebClient.builder()
-                .filter(tokenFilter)
-                .baseUrl(BASE_URL)
-                .clientConnector(new ReactorClientHttpConnector(httpClient))
+                .baseUrl(safBaseUrl)
+                .defaultHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .defaultHeader("Accept", MediaType.APPLICATION_JSON_VALUE)
+                .filter(authorizationHeaderFilter()) // Inject token dynamically
+                .filter(loggingFilter())             // Log request/response
                 .build();
+    }
+
+    private ExchangeFilterFunction authorizationHeaderFilter() {
+        return ExchangeFilterFunction.ofRequestProcessor(request ->
+                tokenManager.getValidAccessToken()
+                        .map(token -> {
+                            return ClientRequest.from(request)
+                                    .headers(headers -> headers.setBearerAuth(token))
+                                    .build();
+                        })
+        );
+    }
+
+    private ExchangeFilterFunction loggingFilter() {
+        return ExchangeFilterFunction.ofRequestProcessor(clientRequest -> {
+            log.info("Request: {} {}", clientRequest.method(), clientRequest.url());
+            clientRequest.headers().forEach((name, values) -> values.forEach(value -> log.info("{}: {}", name, value)));
+            return Mono.just(clientRequest);
+        }).andThen(ExchangeFilterFunction.ofResponseProcessor(clientResponse -> {
+            log.info("Response:: Status {}", clientResponse.statusCode());
+            return Mono.just(clientResponse);
+        }));
     }
 
     @Bean

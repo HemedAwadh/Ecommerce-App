@@ -21,7 +21,7 @@ public class KafkaConsumerService {
     public void consumeReceiverTopic(String message) throws JsonProcessingException {
 
         log.info("=====================================================================");
-        log.info( " INCOMING REQUEST TO BILLING SERVICE{}:: " + message, "");
+        log.info( " INCOMING REQUEST FROM ORDER SERVICE{}:: " + message, "");
         log.info("=====================================================================");
 
         log.info("INCOMING OBJECT REQUEST ::" + message);

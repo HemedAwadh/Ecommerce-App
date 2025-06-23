@@ -8,5 +8,4 @@ import org.springframework.web.service.annotation.PostExchange;
 public interface OrderClient {
     @PostExchange("/mpesa/stkpush/v1/processrequest")
     SafaricomStkPushResponse processBilling(@RequestBody SafaricomStkPushRequest safaricomStkPushRequest);
-
 }
